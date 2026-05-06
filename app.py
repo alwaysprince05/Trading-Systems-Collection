@@ -96,44 +96,10 @@ def custom_metric(label, value, delta=None):
 
 # --- CORE LOGIC ---
 def run_backtest(df_input, system, params=None):
-    df = df_input.copy()
     capital = 10000; pos = 0; cash = capital; equity = []
     buy_signals, sell_signals = [], []
     
-    if system == "Trend Following":
-        macd = ta.trend.MACD(df['Close'])
-        df['MACD'] = macd.macd()
-        df['MACD_sig'] = macd.macd_signal()
-        df['MACD_hist'] = macd.macd_diff()
-        df['EMA_trend'] = ta.trend.EMAIndicator(df['Close'], params.get('trend', 200)).ema_indicator()
-        df.dropna(inplace=True)
-        
-        # Vectorized signals for performance
-        df['Cross'] = 0
-        df.loc[(df['MACD'] > df['MACD_sig']) & (df['MACD'].shift(1) <= df['MACD_sig'].shift(1)), 'Cross'] = 1
-        df.loc[(df['MACD'] < df['MACD_sig']) & (df['MACD'].shift(1) >= df['MACD_sig'].shift(1)), 'Cross'] = -1
-        
-        for idx, row in df.iterrows():
-            if row['Cross'] == 1 and row['Close'] > row['EMA_trend'] and pos == 0:
-                pos = cash // row['Close']; cash -= pos * row['Close']; buy_signals.append((idx, row['Close']))
-            elif row['Cross'] == -1 and pos > 0:
-                cash += pos * row['Close']; sell_signals.append((idx, row['Close'])); pos = 0
-            equity.append(cash + pos * row['Close'])
-            
-    elif system == "Mean Reversion":
-        bb = ta.volatility.BollingerBands(df['Close'], window=params.get('bb_window', 20), window_dev=params.get('bb_std', 2.0))
-        df['BB_L'] = bb.bollinger_lband(); df['BB_U'] = bb.bollinger_hband()
-        df['RSI'] = ta.momentum.RSIIndicator(df['Close']).rsi()
-        df.dropna(inplace=True)
-        
-        for idx, row in df.iterrows():
-            if row['Close'] < row['BB_L'] and row['RSI'] < 30 and pos == 0:
-                pos = cash // row['Close']; cash -= pos * row['Close']; buy_signals.append((idx, row['Close']))
-            elif row['Close'] > row['BB_U'] and row['RSI'] > 70 and pos > 0:
-                cash += pos * row['Close']; sell_signals.append((idx, row['Close'])); pos = 0
-            equity.append(cash + pos * row['Close'])
-            
-    elif system == "Momentum Portfolio":
+    if system == "Momentum Portfolio":
         TICKERS = ["XLK", "XLF", "XLE", "XLV", "XLI", "XLC", "XLY", "XLP", "XLRE", "XLB", "XLU", "GLD"]
         raw = yf.download(TICKERS + ["SPY"], period=params.get('period', '2y'), auto_adjust=True, progress=False)["Close"]
         if isinstance(raw.columns, pd.MultiIndex): raw.columns = [c[0] for c in raw.columns]
@@ -156,6 +122,48 @@ def run_backtest(df_input, system, params=None):
         df["BH"] = capital * (bench.loc[dates] / bench.loc[dates[0]])
         return df, [], []
 
+    if df_input is None or df_input.empty:
+        return None, [], []
+        
+    df = df_input.copy()
+
+    if system == "Trend Following":
+        macd = ta.trend.MACD(df['Close'])
+        df['MACD'] = macd.macd()
+        df['MACD_sig'] = macd.macd_signal()
+        df['MACD_hist'] = macd.macd_diff()
+        df['EMA_trend'] = ta.trend.EMAIndicator(df['Close'], params.get('trend', 200)).ema_indicator()
+        df.dropna(inplace=True)
+        
+        if df.empty: return None, [], []
+        
+        # Vectorized signals for performance
+        df['Cross'] = 0
+        df.loc[(df['MACD'] > df['MACD_sig']) & (df['MACD'].shift(1) <= df['MACD_sig'].shift(1)), 'Cross'] = 1
+        df.loc[(df['MACD'] < df['MACD_sig']) & (df['MACD'].shift(1) >= df['MACD_sig'].shift(1)), 'Cross'] = -1
+        
+        for idx, row in df.iterrows():
+            if row['Cross'] == 1 and row['Close'] > row['EMA_trend'] and pos == 0:
+                pos = cash // row['Close']; cash -= pos * row['Close']; buy_signals.append((idx, row['Close']))
+            elif row['Cross'] == -1 and pos > 0:
+                cash += pos * row['Close']; sell_signals.append((idx, row['Close'])); pos = 0
+            equity.append(cash + pos * row['Close'])
+            
+    elif system == "Mean Reversion":
+        bb = ta.volatility.BollingerBands(df['Close'], window=params.get('bb_window', 20), window_dev=params.get('bb_std', 2.0))
+        df['BB_L'] = bb.bollinger_lband(); df['BB_U'] = bb.bollinger_hband()
+        df['RSI'] = ta.momentum.RSIIndicator(df['Close']).rsi()
+        df.dropna(inplace=True)
+        
+        if df.empty: return None, [], []
+        
+        for idx, row in df.iterrows():
+            if row['Close'] < row['BB_L'] and row['RSI'] < 30 and pos == 0:
+                pos = cash // row['Close']; cash -= pos * row['Close']; buy_signals.append((idx, row['Close']))
+            elif row['Close'] > row['BB_U'] and row['RSI'] > 70 and pos > 0:
+                cash += pos * row['Close']; sell_signals.append((idx, row['Close'])); pos = 0
+            equity.append(cash + pos * row['Close'])
+            
     df['Equity'] = equity
     df['BH'] = (capital / df['Close'].iloc[0]) * df['Close']
     return df, buy_signals, sell_signals
@@ -211,41 +219,44 @@ if execute:
         if df_raw is not None or engine == "Momentum Portfolio":
             df, b_pts, s_pts = run_backtest(df_raw, engine, {"period": period})
             
-            # Metrics
-            final_val = df['Equity'].iloc[-1] if 'Equity' in df.columns else df['equity'].iloc[-1]
-            ret = (final_val - 10000)/100
-            bh_v = df['BH'].iloc[-1]
-            bh_ret = (bh_v - 10000)/100
-            
-            st.markdown('<div class="metric-container">', unsafe_allow_html=True)
-            col1, col2, col3, col4 = st.columns(4)
-            with col1: custom_metric("Portfolio Return", f"{ret:+.2f}%", "Strategic Yield")
-            with col2: custom_metric("Alpha Generation", f"{(ret-bh_ret):+.2f}%", "vs Benchmark")
-            with col3: 
-                mdd = (((df['Equity'] if 'Equity' in df.columns else df['equity']) - (df['Equity'] if 'Equity' in df.columns else df['equity']).cummax()) / (df['Equity'] if 'Equity' in df.columns else df['equity']).cummax() * 100).min()
-                custom_metric("Peak Risk", f"{mdd:.2f}%", "Max Drawdown")
-            with col4: custom_metric("Final Equity", f"${final_val:,.0f}", "Net Value")
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-            # Plot
-            if engine != "Momentum Portfolio":
-                st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-                st.plotly_chart(plot_interactive(df, ticker, engine, b_pts, s_pts), use_container_width=True)
+            if df is not None and not df.empty:
+                # Metrics
+                final_val = df['Equity'].iloc[-1] if 'Equity' in df.columns else df['equity'].iloc[-1]
+                ret = (final_val - 10000)/100
+                bh_v = df['BH'].iloc[-1]
+                bh_ret = (bh_v - 10000)/100
+                
+                st.markdown('<div class="metric-container">', unsafe_allow_html=True)
+                col1, col2, col3, col4 = st.columns(4)
+                with col1: custom_metric("Portfolio Return", f"{ret:+.2f}%", "Strategic Yield")
+                with col2: custom_metric("Alpha Generation", f"{(ret-bh_ret):+.2f}%", "vs Benchmark")
+                with col3: 
+                    mdd = (((df['Equity'] if 'Equity' in df.columns else df['equity']) - (df['Equity'] if 'Equity' in df.columns else df['equity']).cummax()) / (df['Equity'] if 'Equity' in df.columns else df['equity']).cummax() * 100).min()
+                    custom_metric("Peak Risk", f"{mdd:.2f}%", "Max Drawdown")
+                with col4: custom_metric("Final Equity", f"${final_val:,.0f}", "Net Value")
                 st.markdown('</div>', unsafe_allow_html=True)
+                
+                # Plot
+                if engine != "Momentum Portfolio":
+                    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+                    st.plotly_chart(plot_interactive(df, ticker, engine, b_pts, s_pts), use_container_width=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                else:
+                    # Specialized Plotly for Portfolio
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(x=df.index, y=df['equity'], name='Portfolio', fill='tozeroy', line=dict(color='#00ffcc')))
+                    fig.add_trace(go.Scatter(x=df.index, y=df['BH'], name='SPY Benchmark', line=dict(color='rgba(255,255,255,0.3)', dash='dot')))
+                    fig.update_layout(height=500, template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+                    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+                    st.plotly_chart(fig, use_container_width=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                
+                with st.expander("📝 ANALYTICS LOGS"):
+                    st.dataframe(df.tail(20), use_container_width=True)
             else:
-                # Specialized Plotly for Portfolio
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(x=df.index, y=df['equity'], name='Portfolio', fill='tozeroy', line=dict(color='#00ffcc')))
-                fig.add_trace(go.Scatter(x=df.index, y=df['BH'], name='SPY Benchmark', line=dict(color='rgba(255,255,255,0.3)', dash='dot')))
-                fig.update_layout(height=500, template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-                st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-                st.plotly_chart(fig, use_container_width=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-            with st.expander("📝 ANALYTICS LOGS"):
-                st.dataframe(df.tail(20), use_container_width=True)
+                st.error("NOT ENOUGH DATA: Lookback period is too short for indicator calculation (e.g., 200 EMA needs >200 days).")
         else:
-            st.error("FAILED TO FETCH MARKET DATA.")
+            st.error("FAILED TO FETCH MARKET DATA. TICKER MAY BE INVALID.")
 else:
     st.markdown("""
         <div class="glass-card" style="text-align:center; padding: 80px 40px;">
