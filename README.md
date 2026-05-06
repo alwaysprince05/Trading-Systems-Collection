@@ -1,7 +1,7 @@
 ---
 title: Prince Quant Terminal
 emoji: ⚡
-colorFrom: cyan
+colorFrom: blue
 colorTo: purple
 sdk: docker
 sdk_version: 1.40.1
