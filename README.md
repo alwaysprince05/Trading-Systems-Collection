@@ -11,6 +11,8 @@ pinned: false
 
 # 🚀 Trading Systems Collection - Quant Pro Edition
 
+[![View Live App](https://img.shields.io/badge/View_Live_App-Hugging_Face-blue?logo=huggingface&style=for-the-badge)](https://huggingface.co/spaces/alwaysprince05e/Trading-Systems-Collection)
+
 ## Created by: Prince Maurya
 
 ---
